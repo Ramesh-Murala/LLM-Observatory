@@ -1,0 +1,30 @@
+name: Quality gate
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  evaluate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -c constraints.txt -e '.[dev]'
+      - run: ruff check .
+      - run: pytest -q
+      - name: Require stable fixture to meet release policy
+        run: observatory gate --scenario stable --output reports/stable.json
+      - name: Verify that a known regression blocks release
+        shell: bash
+        run: |
+          set +e
+          observatory gate --scenario regression --output reports/regression.json
+          status=$?
+          set -e
+          test "$status" -eq 1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: evaluation-evidence
+          path: reports/*.json

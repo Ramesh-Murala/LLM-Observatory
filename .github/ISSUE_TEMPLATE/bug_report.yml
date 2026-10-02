@@ -1,0 +1,22 @@
+name: Bug report
+description: Report a reproducible problem with evaluation or the workspace.
+body:
+  - type: textarea
+    id: behavior
+    attributes:
+      label: What happened?
+      description: Include the expected behavior and actual result.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      description: Include a minimal synthetic case if the problem involves scoring.
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, Python version, and provider mode. Never include credentials.
