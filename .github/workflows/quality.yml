@@ -23,8 +23,50 @@ jobs:
           status=$?
           set -e
           test "$status" -eq 1
+      - name: Check structured contracts and comparison reports
+        shell: bash
+        run: |
+          observatory gate --scenario stable --dataset observatory/data/structured-contracts-v1.jsonl --output reports/schema-stable.json
+          set +e
+          observatory gate --scenario regression --dataset observatory/data/structured-contracts-v1.jsonl --output reports/schema-regression.json
+          status=$?
+          set -e
+          test "$status" -eq 1
+          observatory compare --baseline-report reports/schema-stable.json --candidate-report reports/schema-regression.json --output reports/schema-comparison.json
       - uses: actions/upload-artifact@v4
         if: always()
         with:
           name: evaluation-evidence
           path: reports/*.json
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: pip install -c constraints.txt -e '.[dev]'
+      - run: npm install --no-save playwright@1.62.1
+      - run: npx playwright install --with-deps chromium
+      - name: Verify interactive workspace
+        shell: bash
+        run: |
+          uvicorn observatory.api:app --host 127.0.0.1 --port 8000 > /tmp/observatory-server.log 2>&1 &
+          server_pid=$!
+          trap 'kill "$server_pid" 2>/dev/null || true' EXIT
+          for attempt in $(seq 1 50); do
+            if curl --fail http://127.0.0.1:8000/api/health; then break; fi
+            sleep 1
+          done
+          node scripts/browser_smoke.cjs
+          python examples/custom_dataset.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: workspace-browser-evidence
+          path: |
+            /tmp/observatory-workspace-*.png
+            /tmp/observatory-server.log

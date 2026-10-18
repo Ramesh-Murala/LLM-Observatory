@@ -34,7 +34,8 @@ API key is needed to try that workflow.
 | Capability | Implemented behavior |
 | --- | --- |
 | Paired evaluations | Baseline and candidate run against the same SHA-256-fingerprinted JSONL dataset |
-| Deterministic checks | Reference match, phrase inclusion/exclusion, word limits, and JSON field types |
+| Dataset workspace | Upload JSONL, validate contracts, and retain immutable content-addressed versions |
+| Deterministic checks | References, phrase rules, word limits, JSON field types, and nested Draft 2020-12 JSON Schema |
 | Trace inspection | Prompt, response, check reasons, provider errors, trace ID, and span ID per case |
 | Experiment history | Persistent runs with category comparisons and failed-case filtering |
 | Release gate | Blocks quality drops, p95 latency increases, and candidate provider errors |
@@ -43,6 +44,7 @@ API key is needed to try that workflow.
 | Observability | Optional OTLP HTTP span export and Prometheus-format retained-run metrics |
 | Persistence | SQLite by default; PostgreSQL configuration in Docker Compose |
 | CI evidence | Tests, lint, a passing scenario, a known blocked scenario, and uploaded JSON reports |
+| Cross-run review | Paired case transitions, category deltas, Wilson case-proportion intervals, JSON/CSV export |
 
 ## Quick start
 
@@ -81,6 +83,14 @@ The seed command is optional; without it the dashboard starts with an empty hist
 2. Select **Failed cases only**, then open `json-03`: its response returns a string where an integer is required.
 3. Select **Stable scenario** and click **Run evaluation**. The candidate now passes all contracts.
 4. Click an older experiment to revisit its evidence. Refresh the page to verify persistence.
+5. In **Your test contracts**, upload `observatory/data/structured-contracts-v1.jsonl`.
+6. Run stable and regression scenarios on that uploaded version. Compare their experiments
+   and download case-level evidence using **Compare experiments**.
+
+The additional structured-contract suite has 12 hand-authored cases covering nested objects,
+arrays, bounds, enums, local references, and conditional requirements. Its scripted regression
+fails seven cases by design. These are evaluator examples, not live-model measurements.
+See [custom datasets and evidence review](docs/datasets.md) for the format and API walkthrough.
 
 ## How it works
 
@@ -102,7 +112,8 @@ flowchart LR
 
 The engine treats a case as passing only when **every check passes**. A provider exception fails
 the case and becomes evidence; the error message itself is not persisted. The dataset contains
-16 focused fixture cases in four categories. Its content hash is recorded in every report.
+16 focused fixture cases in four categories, plus a separate 12-case structured-contract suite.
+The selected dataset's content hash is recorded in every report.
 
 Fixture responses are predefined. Fixture latency is simulated and token usage is a word-count
 estimate. The pipeline and scoring run for real, but those fixtures do not measure a real model.
@@ -121,9 +132,14 @@ observatory gate --scenario regression --output reports/regression.json
 
 # Configure your release budget
 observatory gate --scenario stable --max-quality-drop 0.01 --max-latency-ratio 1.25
+
+# Compare candidate traces from two saved experiments on the same dataset
+observatory compare --baseline-report reports/stable.json --candidate-report reports/regression.json --output reports/comparison.json
 ```
 
-Exit code `2` means the experiment or report could not be completed. `seed` stores an experiment
+Exit code `2` means the experiment or report could not be completed. `compare` returns `0` when
+its report is produced; it describes changes and does not substitute for the release gate.
+`seed` stores an experiment
 for the dashboard and returns `0` when storage succeeds, even if its release decision is blocked.
 
 The included GitHub workflow validates the fixture pipeline on pushes and pull requests. It does
@@ -161,6 +177,8 @@ observatory/
   api.py              HTTP routes and application lifecycle
   engine.py           Paired experiments, summaries, and release policy
   evaluators.py       Deterministic response contracts
+  datasets.py         Bounded JSONL validation and content-addressed versions
+  reports.py          Cross-run comparisons, intervals, and CSV exports
   providers.py        Fixture and compatible HTTP adapters
   store.py            SQLAlchemy persistence
   telemetry.py        Optional OTLP export
@@ -188,17 +206,23 @@ decisions, failed-case filtering, trace details, and the mobile layout.
 
 This is a working local evaluation workbench. The small dataset is suitable for demonstrating
 the workflow, not for statistical claims about model quality. Phrase checks are specific response
-contracts, not general safety classification. JSON checks validate required top-level field
-types; they do not implement full JSON Schema validation. p95 uses nearest rank, with no
-confidence interval or repeated-sampling correction.
+contracts, not general safety classification. The legacy `json` check validates required
+top-level field types. The `json_schema` check supports nested Draft 2020-12 contracts with
+document-local references; external resource retrieval is disabled. Format annotations
+(such as `email`) are not asserted; use explicit constraints when needed. p95 uses nearest
+rank, with no repeated-sampling correction.
+
+Comparison reports include Wilson intervals for each run's pass proportion, not an interval
+for the paired difference. Their independence and representativeness assumptions do not hold
+for the synthetic demonstration cases, so they do not establish model quality.
 
 There is no authentication, request queue, distributed worker, or automatic production traffic
 capture. Runs execute synchronously; history and metrics retain the latest 100 runs. Prompt and
 response bodies are stored locally. Read [SECURITY.md](SECURITY.md) before using private inputs.
 Cost estimates require your own pricing and are not a billing statement or a cost gate.
 
-The next useful additions are repeated trials with uncertainty estimates, human review labels,
-JSON Schema support, migrations, and background execution for larger datasets. LLM-as-judge
+The next useful additions are repeated model trials, human review labels,
+migrations, authentication, and background execution for larger datasets. LLM-as-judge
 scoring would need its own calibration dataset before it could be trusted as a release gate.
 
 ## Design decisions

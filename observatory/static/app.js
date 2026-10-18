@@ -46,6 +46,11 @@ function renderRun(run) {
   $('decision').textContent = run.gate.passed ? 'Approved' : 'Blocked';
   $('decision').style.color = run.gate.passed ? 'var(--mint)' : 'var(--red)';
   $('decision-note').textContent = run.gate.passed ? 'All release checks passed' : `${run.gate.reasons.length} release check failed`;
+  document.querySelector('.policy-note b').textContent = `${(run.gate.policy.max_quality_drop * 100).toFixed(1)}%`;
+  $('export-json').href = `/api/runs/${run.id}/export?format=json`;
+  $('export-csv').href = `/api/runs/${run.id}/export?format=csv`;
+  $('comparison-result').textContent = 'Choose an earlier experiment to inspect case-level changes.';
+  $('comparison-cases').replaceChildren();
   $('gate-verdict').textContent = run.gate.passed ? 'Ready for the next step.' : 'Regression detected.';
   $('gate-description').textContent = run.gate.passed
     ? 'The candidate stays within the configured budgets. All cases completed without provider errors.'
@@ -111,6 +116,13 @@ function renderTraces() {
 
 function renderHistory() {
   $('run-count').textContent = history.length;
+  const previousSelection = $('compare-baseline').value;
+  $('compare-baseline').replaceChildren(...history.map(run => {
+    const option = element('option', `${run.dataset} · ${run.scenario} · ${run.id.slice(0, 8)}`);
+    option.value = run.id;
+    return option;
+  }));
+  if (history.some(run => run.id === previousSelection)) $('compare-baseline').value = previousSelection;
   $('runs-body').replaceChildren(...history.map(run => {
     const row = element('tr', undefined, run.id === currentRun?.id ? 'selected-row' : '');
     const cell = element('td');
@@ -138,7 +150,8 @@ $('run-button').addEventListener('click', async () => {
   $('error').hidden = true;
   try {
     const run = await request('/api/runs', {method: 'POST', headers: {'Content-Type':'application/json'},
-      body: JSON.stringify({scenario: $('scenario').value})});
+      body: JSON.stringify({scenario: $('scenario').value, dataset_id: $('dataset').value || null,
+        max_quality_drop: Number($('quality-budget').value), max_latency_ratio: Number($('latency-budget').value)})});
     history = await request('/api/runs');
     renderRun(run);
   } catch (error) { showError(error.message); }
@@ -146,8 +159,51 @@ $('run-button').addEventListener('click', async () => {
 });
 $('failed-only').addEventListener('change', renderTraces);
 $('close-dialog').addEventListener('click', () => $('trace-dialog').close());
+
+async function loadDatasets(selected) {
+  const datasets = await request('/api/datasets');
+  $('dataset').replaceChildren(...datasets.map(dataset => {
+    const option = element('option', `${dataset.name} · ${dataset.cases} cases`);
+    option.value = dataset.id || '';
+    return option;
+  }));
+  if (selected) $('dataset').value = selected;
+}
+
+$('upload-dataset').addEventListener('click', async () => {
+  const file = $('dataset-file').files[0];
+  if (!file || file.size > 512000) { showError('Choose a JSONL file no larger than 512 KB.'); return; }
+  $('upload-dataset').disabled = true;
+  $('error').hidden = true;
+  try {
+    const dataset = await request('/api/datasets', {method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({name: $('dataset-name').value, jsonl: await file.text()})});
+    await loadDatasets(dataset.id);
+    $('dataset-status').textContent = `${dataset.name} · ${dataset.cases} cases · SHA-256 ${dataset.id}`;
+  } catch (error) { showError('Dataset could not be uploaded. Check its JSONL fields and contracts in the API reference.'); }
+  finally { $('upload-dataset').disabled = false; }
+});
+
+$('compare-button').addEventListener('click', async () => {
+  if (!currentRun || !$('compare-baseline').value) { showError('Run an evaluation first.'); return; }
+  $('compare-button').disabled = true;
+  $('error').hidden = true;
+  try {
+    const params = new URLSearchParams({baseline: $('compare-baseline').value, candidate: currentRun.id});
+    const report = await request(`/api/compare?${params}`);
+    const interval = values => values.map(value => `${(value * 100).toFixed(1)}%`).join(' – ');
+    $('comparison-result').textContent = `${report.regressions} regressions · ${report.improvements} improvements · ${(report.pass_rate_delta * 100).toFixed(1)} pp change. Case-proportion Wilson 95% intervals: earlier ${interval(report.baseline_wilson_95)}, selected ${interval(report.candidate_wilson_95)}. ${report.limitations}`;
+    $('comparison-cases').replaceChildren(...report.cases_detail.map(item => {
+      const row = element('tr');
+      row.append(element('td', item.case_id), element('td', item.category), element('td', item.transition.replaceAll('_', ' ')));
+      return row;
+    }));
+  } catch (error) { showError('Comparison requires two existing runs with identical dataset fingerprints.'); }
+  finally { $('compare-button').disabled = false; }
+});
 async function initialize() {
   try {
+    await loadDatasets();
     history = await request('/api/runs');
     renderHistory();
     if (history.length) renderRun(await request(`/api/runs/${history[0].id}`));
