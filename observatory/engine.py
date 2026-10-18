@@ -1,7 +1,5 @@
 """Run paired evaluations and decide whether a candidate meets a release policy."""
 
-import hashlib
-import json
 import math
 import os
 import time
@@ -10,6 +8,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .datasets import parse_dataset
 from .evaluators import evaluate
 from .providers import CompatibleProvider, FixtureProvider
 from .telemetry import tracer
@@ -18,14 +17,7 @@ DATASET = Path(__file__).parent / "data" / "reliability-v1.jsonl"
 
 
 def load_dataset(path: Path = DATASET) -> tuple[list[dict], str]:
-    raw = path.read_bytes()
-    cases = [json.loads(line) for line in raw.decode().splitlines() if line.strip()]
-    ids = [case["id"] for case in cases]
-    if not cases or len(ids) != len(set(ids)):
-        raise ValueError("Dataset must be nonempty with unique case IDs")
-    for case in cases:
-        evaluate(case, case["baseline"])
-    return cases, hashlib.sha256(raw).hexdigest()
+    return parse_dataset(path.read_bytes())
 
 
 def percentile(values: list[float], quantile: float) -> float:
@@ -59,15 +51,21 @@ def run_experiment(
     path: Path = DATASET,
     max_quality_drop: float = 0.02,
     max_latency_ratio: float = 1.5,
+    dataset_raw: bytes | None = None,
+    dataset_name: str | None = None,
 ) -> dict:
+    if not math.isfinite(max_quality_drop) or not 0 <= max_quality_drop <= 1:
+        raise ValueError("Quality drop must be finite and in [0, 1]")
+    if not math.isfinite(max_latency_ratio) or max_latency_ratio <= 0:
+        raise ValueError("Latency ratio must be finite and positive")
     if provider_name not in {"fixture", "compatible"}:
         raise ValueError("Unknown provider")
     if scenario not in {"regression", "stable"}:
         raise ValueError("Unknown scenario")
     if provider_name == "compatible" and scenario == "stable":
         raise ValueError("Stable scenario is only available for fixtures")
+    cases, fingerprint = load_dataset(path) if dataset_raw is None else parse_dataset(dataset_raw)
     provider = FixtureProvider() if provider_name == "fixture" else CompatibleProvider()
-    cases, fingerprint = load_dataset(path)
     traces, summaries = [], {}
     prices = {}
     for variant in ("baseline", "candidate"):
@@ -153,7 +151,7 @@ def run_experiment(
     return {
         "id": uuid.uuid4().hex,
         "created_at": datetime.now(timezone.utc).isoformat(),
-        "dataset": path.stem,
+        "dataset": dataset_name or path.stem,
         "dataset_sha256": fingerprint,
         "provider": provider_name,
         "scenario": scenario,
