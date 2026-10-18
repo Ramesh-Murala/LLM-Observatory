@@ -42,7 +42,7 @@ const path = require('node:path');
     await page.locator('#traces-body button').first().click();
     assert.equal(await page.locator('#trace-dialog').isVisible(), true);
     await page.locator('#close-dialog').click();
-    const csv = await page.request.get(await page.locator('#export-csv').getAttribute('href'));
+    const csv = await page.request.get(await page.locator('#export-csv').evaluate(link => link.href));
     assert.equal(csv.status(), 200);
     assert.ok((await csv.text()).startsWith('case_id,category'));
     await page.screenshot({path: '/tmp/observatory-workspace-desktop.png', fullPage: true});
