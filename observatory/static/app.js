@@ -27,7 +27,7 @@ function renderRun(run) {
     ? 'Local demo environment · deterministic responses · simulated latency · estimated token usage · no paid calls'
     : 'Remote provider evidence · measured latency · cost estimates depend on supplied pricing';
   document.querySelector('.notice-tag').textContent = `${candidate.cases} CASES`;
-  document.querySelector('.table-tag').textContent = run.dataset;
+  $('experiments').querySelector('.table-tag').textContent = run.dataset;
   $('quality').textContent = `${(candidate.pass_rate * 100).toFixed(1)}%`;
   $('quality-note').textContent = `${((candidate.pass_rate - base.pass_rate) * 100).toFixed(1)} pp vs baseline`;
   $('latency').textContent = `${candidate.p95_ms.toFixed(0)} ms`;

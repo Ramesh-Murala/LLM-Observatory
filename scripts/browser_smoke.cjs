@@ -33,6 +33,8 @@ const path = require('node:path');
     assert.equal(stable.summaries.candidate.cases, 12);
     const regression = await run('regression');
     assert.equal(regression.summaries.candidate.pass_rate, 5 / 12);
+    assert.equal(await page.locator('#experiments .table-tag').textContent(), regression.dataset);
+    assert.equal(await page.locator('.dataset-panel .table-tag').textContent(), 'Dataset API ↗');
     await page.locator('#compare-baseline').selectOption(stable.id);
     await page.locator('#compare-button').click();
     await page.waitForFunction(() => document.getElementById('comparison-result').textContent.startsWith('7 regressions'));
