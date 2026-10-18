@@ -5,13 +5,16 @@ import json
 from pathlib import Path
 
 from .engine import DATASET, run_experiment
+from .reports import compare_runs
 from .store import Store
 from .telemetry import configure
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("command", choices=["gate", "seed"])
+    parser.add_argument("command", choices=["gate", "seed", "compare"])
+    parser.add_argument("--baseline-report", type=Path)
+    parser.add_argument("--candidate-report", type=Path)
     parser.add_argument("--scenario", choices=["stable", "regression"], default="stable")
     parser.add_argument("--provider", choices=["fixture", "compatible"], default="fixture")
     parser.add_argument("--output", type=Path, default=Path("reports/gate.json"))
@@ -23,6 +26,18 @@ def main():
         parser.error("Quality drop must be in [0,1]; latency ratio must be positive")
     telemetry = configure()
     try:
+        if args.command == "compare":
+            if not args.baseline_report or not args.candidate_report:
+                raise ValueError("Compare requires baseline and candidate reports")
+            report = compare_runs(
+                json.loads(args.baseline_report.read_text(encoding="utf-8")),
+                json.loads(args.candidate_report.read_text(encoding="utf-8")),
+            )
+            args.output.parent.mkdir(parents=True, exist_ok=True)
+            args.output.write_text(json.dumps(report, indent=2), encoding="utf-8")
+            print(json.dumps({"regressions": report["regressions"],
+                              "improvements": report["improvements"]}))
+            return 0
         result = run_experiment(
             args.provider,
             args.scenario,
