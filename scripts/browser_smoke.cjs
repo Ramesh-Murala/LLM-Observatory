@@ -5,12 +5,13 @@ const path = require('node:path');
 
 (async () => {
   const browser = await chromium.launch({headless: true});
+  let page;
   try {
-    const page = await browser.newPage({viewport: {width: 1440, height: 1000}});
+    page = await browser.newPage({viewport: {width: 1440, height: 1000}});
     const errors = [];
     page.on('pageerror', error => errors.push(error.message));
     await page.goto(process.env.OBSERVATORY_URL || 'http://127.0.0.1:8000');
-    await page.locator('#dataset option').first().waitFor();
+    await page.locator('#dataset').waitFor();
     await page.locator('#dataset-name').fill('browser-schema-smoke');
     await page.locator('#dataset-file').setInputFiles(
       path.resolve(__dirname, '../observatory/data/structured-contracts-v1.jsonl'));
@@ -50,5 +51,8 @@ const path = require('node:path');
     await page.screenshot({path: '/tmp/observatory-workspace-mobile.png', fullPage: true});
     assert.deepEqual(errors, []);
     console.log('Browser smoke passed: upload, stable/blocked runs, comparisons, filters, traces, export, mobile layout.');
+  } catch (error) {
+    if (page) await page.screenshot({path: '/tmp/observatory-workspace-failure.png', fullPage: true});
+    throw error;
   } finally { await browser.close(); }
 })().catch(error => { console.error(error); process.exitCode = 1; });
